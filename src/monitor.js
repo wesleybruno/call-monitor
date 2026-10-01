@@ -182,7 +182,7 @@
       const rows = draft.people.map((p, i) => p.removed ? "" : `<div class="prow ${p.present ? "" : "dim"}">
         <input class="nm" data-i="${i}" value="${esc(p.name)}" placeholder="Nome">
         <input class="rt" data-i="${i}" type="number" min="0" value="${p.rate}" title="R$/hora">
-        <select class="tr" data-i="${i}" title="Preencher pela faixa"><option value="">faixa</option>${cfg.tiers.map((t, j) => `<option value="${j}">${esc(t.name)}</option>`).join("")}</select>
+        <select class="tr" data-i="${i}" title="Preencher pela faixa"><option value="">faixa</option>${cfg.tiers.map((t, j) => `<option value="${j}" ${p.tier === j && t.rate === p.rate ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select>
         <button data-act="delp" data-i="${i}" class="sm" title="${p.hist ? (p.present ? "Marcar ausente" : "Voltar") : "Remover"}">${p.hist && !p.present ? "↺" : "✕"}</button></div>`).join("");
       body = `<div class="row"><span>Valor padrão p/ novos (R$/h)</span><input id="def" type="number" min="0" value="${draft.defaultRate}"></div>
         ${rows || `<p>Nenhum nome detectado no Meet. Adicione manualmente.</p>`}
@@ -569,7 +569,9 @@
     }
     if (view === "form" && t.classList.contains("tr") && t.value !== "") {
       draft.dirty = true;
-      draft.people[+t.dataset.i].rate = cfg.tiers[+t.value].rate;
+      const dp = draft.people[+t.dataset.i];
+      dp.rate = cfg.tiers[+t.value].rate;
+      dp.tier = +t.value; // mantém a faixa escolhida visível no dropdown
       render();
     } else if (view === "live" && (t.classList.contains("prate") || t.classList.contains("pname"))) {
       const p = session.people.find((x) => x.id === t.closest(".pr").dataset.id);
