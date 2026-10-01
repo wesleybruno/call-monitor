@@ -209,10 +209,14 @@
       <div class="stats"><div><small id="since">Tempo</small><b id="time"></b></div><div><small>Pessoas</small><b id="ppl"></b></div><div><small>Por hora</small><b id="rate"></b></div></div>
       <div class="hint" id="hint" hidden></div>
       ${session.mode === "people"
-        ? `<div class="sec" id="pcount">Participantes</div><div class="plist" id="plist"></div>
-           <form class="padd" id="padd"><input id="addname" placeholder="Novo participante" autocomplete="off"><input id="addrate" type="number" min="0" value="${session.defaultRate}" title="R$/hora"><button class="pri sm" type="submit">+ Adicionar</button></form>`
-        : `<button class="sm" data-act="topeople">👥 Gerenciar participantes individualmente</button>`}
-      <div class="act"><button data-act="pause" id="pause"></button><button data-act="adjust">Ajustar</button><button class="danger" data-act="finish">Finalizar</button></div></div>`;
+        ? `<div class="sec" id="pcount">Participantes</div><div class="plist" id="plist"></div>`
+        : `<div class="grow"></div>`}
+      <div class="foot">
+        ${session.mode === "people"
+          ? `<form class="padd" id="padd"><input id="addname" placeholder="Novo participante" autocomplete="off"><input id="addrate" type="number" min="0" value="${session.defaultRate}" title="R$/hora"><button class="pri sm" type="submit">+ Adicionar</button></form>`
+          : `<button class="sm" data-act="topeople">👥 Gerenciar participantes individualmente</button>`}
+        <div class="act"><button data-act="pause" id="pause"></button><button data-act="adjust">Ajustar</button><button class="danger" data-act="finish">Finalizar</button></div>
+      </div></div>`;
     updateLive();
   }
 
