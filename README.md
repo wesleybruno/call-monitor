@@ -12,5 +12,5 @@ Extensão Chrome (MV3) que mede o custo de reuniões do Google Meet em tempo rea
 - `src/content.js` — publica `{inCall, count, title}` em `chrome.storage.local.meet`.
 - `src/background.js` — abre/foca a janela popup do painel.
 - `src/monitor.*` — painel: check-in, custo ao vivo, pausa, ajuste, resumo. 📌 fixa sobre outras janelas (Document PiP).
-- `src/options.*` — valores, faixas, histórico, CSV, import/export JSON.
+- Configurações (valores, faixas, histórico, CSV, import/export JSON) são uma tela dentro do painel (⚙), com botão Voltar.
 - `managed-schema.json` — política corporativa (`chrome.storage.managed`) prevalece sobre config pessoal.

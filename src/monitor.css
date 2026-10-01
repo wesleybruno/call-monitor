@@ -54,3 +54,7 @@ input[type=number]{width:90px;padding:7px;border:1px solid var(--bg3);border-rad
 .pr button{padding:4px 8px}
 .padd{display:flex;gap:6px}.padd input{min-width:0;padding:7px;border:1px solid var(--bg3);border-radius:6px;font-size:13px;background:var(--bg2);color:var(--fg)}
 .padd input:first-child{flex:1}.padd input[type=number]{width:70px}
+.note{font-size:12px;margin-top:-6px}input[type=time]{padding:6px;border:1px solid var(--bg3);border-radius:6px;font-size:14px;background:var(--bg2);color:var(--fg);color-scheme:dark}
+.srow{display:grid;grid-template-columns:1fr 90px 30px;gap:6px;margin:4px 0}
+.srow input{min-width:0;padding:6px;border:1px solid var(--bg3);border-radius:6px;font-size:13px;background:var(--bg2);color:var(--fg)}
+input:disabled,button:disabled{opacity:.45;cursor:not-allowed}

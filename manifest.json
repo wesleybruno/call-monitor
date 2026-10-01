@@ -12,7 +12,6 @@
       "run_at": "document_idle"
     }
   ],
-  "options_page": "src/options.html",
   "action": { "default_title": "Abrir painel de custo" },
   "background": { "service_worker": "src/background.js" },
   "storage": { "managed_schema": "managed-schema.json" }

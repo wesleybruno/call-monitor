@@ -19,9 +19,24 @@
   let lostAt = 0;
   let pip = null;
   let plistSig = "";
+  let settingsOpen = false;
+  let sdraft = null;      // rascunho das configurações
+  let shist = [];         // histórico exibido nas configurações
+  let smanaged = {};      // chaves definidas por política da organização
+  let sflash = "";
 
   // Meet publicando há pouco = chamada em andamento (evita estado velho de reunião já encerrada).
   const inCall = () => !!meet.inCall && Date.now() - (meet.ts || 0) < 20000;
+
+  const hhmm = (t) => new Date(t).toTimeString().slice(0, 5);
+  // "HH:MM" de hoje; se cair no futuro (reunião começou antes da meia-noite) vale o dia anterior.
+  function parseStart(v) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(v || "");
+    if (!m) return Date.now();
+    const d = new Date();
+    d.setHours(+m[1], +m[2], 0, 0);
+    return d.getTime() > Date.now() + 60000 ? d.getTime() - 86400000 : Math.min(d.getTime(), Date.now());
+  }
 
   // ---------- modelo ----------
   const presentOf = (s) => s.people.filter((p) => p.present);
@@ -97,7 +112,8 @@
   // ---------- views ----------
   function decide() {
     let v;
-    if (formOpen) v = "form";
+    if (settingsOpen) v = "settings";
+    else if (formOpen) v = "form";
     else if (session) v = "live";
     else if (summary) v = "summary";
     else if (inCall() && skipped !== meet.code) v = "form";
@@ -118,6 +134,7 @@
     return {
       mode: session ? session.mode : (meet.names && meet.names.length ? "people" : "avg"),
       srcSig: JSON.stringify([meet.names, meet.count]), dirty: false,
+      startTime: hhmm(session ? session.start : Date.now()), startTouched: false,
       avgRate: session ? session.avgRate : cfg.avgRate,
       headcount: session ? session.headcount : auto || 2,
       tierCounts, people, defaultRate, nextId,
@@ -134,6 +151,7 @@
     } else if (view === "form") renderForm();
     else if (view === "live") renderLive();
     else if (view === "summary") renderSummary();
+    else if (view === "settings") renderSettings();
   }
 
   function renderForm() {
@@ -160,6 +178,8 @@
     app.innerHTML = `<header><span>${editing ? "Ajustar" : "Check-in da reunião"}</span></header>
       <h2>${editing ? "Ajustar valores" : "Como calcular o custo?"}</h2>
       ${!editing && inCall() ? `<p>${esc(meet.title || "Chamada do Meet")}${auto ? ` · ${auto} participante(s) detectado(s)` : ""}</p>` : ""}
+      <div class="row"><span>Início da reunião</span><span class="step"><input id="start" type="time" value="${draft.startTime}"><button class="sm" data-act="startnow">Agora</button></span></div>
+      <p class="note">Já começou? Informe o horário: o custo conta desde lá, com os participantes e valores atuais.</p>
       ${opt("avg", "Média única", "Mesmo valor/hora para todos. Acompanha a contagem do Meet.")}
       ${opt("tiers", "Por faixa", "Quantas pessoas de cada nível.")}
       ${opt("people", "Por pessoa", "Valor individual de cada participante. Gera relatório individual.")}
@@ -172,7 +192,7 @@
       <header><span>Custo da reunião</span><span class="tools"><button data-act="pin" title="Fixar sobre as outras janelas">📌</button><button data-act="options" title="Configurações">⚙</button></span></header>
       <div class="cost" id="cost">R$ 0,00</div>
       <div class="bar"><i id="bar"></i></div><div class="budget" id="budget"></div>
-      <div class="stats"><div><small>Tempo</small><b id="time"></b></div><div><small>Pessoas</small><b id="ppl"></b></div><div><small>Por hora</small><b id="rate"></b></div></div>
+      <div class="stats"><div><small id="since">Tempo</small><b id="time"></b></div><div><small>Pessoas</small><b id="ppl"></b></div><div><small>Por hora</small><b id="rate"></b></div></div>
       <div class="hint" id="hint" hidden></div>
       ${session.mode === "people"
         ? `<div class="sec" id="pcount">Participantes</div><div class="plist" id="plist"></div>
@@ -221,6 +241,7 @@
     $("#bar").style.width = pct + "%";
     $("#budget").textContent = limit > 0 ? `${Math.round(pct)}% do limite de ${brl(limit)}` : "Sem limite definido";
     $("#time").textContent = fmtTime(ms);
+    $("#since").textContent = "Desde " + hhmm(session.start);
     $("#ppl").textContent = peopleOf(session);
     $("#rate").textContent = brl(rateOf(session)) + "/h";
     $("#pause").textContent = session.paused ? "▶ Retomar" : "⏸ Pausar";
@@ -234,6 +255,59 @@
     chrome.action.setBadgeText({ text: compact(cost) });
     chrome.action.setBadgeBackgroundColor({ color: level === "over" ? "#d94343" : level === "warn" ? "#d9a300" : "#2ea36b" });
   }
+
+  // ---------- configurações ----------
+  async function openSettings() {
+    const [{ config }, { history = [] }, managed] = await Promise.all([
+      chrome.storage.local.get("config"),
+      chrome.storage.local.get("history"),
+      chrome.storage.managed.get(null).catch(() => ({})),
+    ]);
+    const base = { ...Common.DEFAULTS, ...(config || {}) };
+    sdraft = { avgRate: base.avgRate, budgetLimit: base.budgetLimit, tiers: base.tiers.map((t) => ({ ...t })) };
+    shist = history; smanaged = managed; sflash = "";
+    settingsOpen = true; view = null; decide();
+  }
+  function closeSettings() { settingsOpen = false; sdraft = null; view = null; decide(); }
+
+  function renderSettings() {
+    const lock = (k) => (k in smanaged ? "disabled" : "");
+    const tiers = sdraft.tiers.map((t, i) => `<div class="srow"><input class="s-tn" data-i="${i}" value="${esc(t.name)}" placeholder="Nome" ${lock("tiers")}>
+      <input class="s-tr" data-i="${i}" type="number" min="0" value="${t.rate}" title="R$/hora" ${lock("tiers")}>
+      <button class="sm" data-act="stierdel" data-i="${i}" ${lock("tiers")}>✕</button></div>`).join("");
+    const hist = shist.slice(0, 8).map((h) => `<tr><td>${new Date(h.start).toLocaleDateString("pt-BR")}</td><td>${esc(h.title)}</td><td>${brl(h.cost)}</td></tr>`).join("");
+    app.innerHTML = `<header><span>Configurações</span><span class="tools"><button data-act="sback">← Voltar</button></span></header>
+      ${Object.keys(smanaged).length ? `<p class="note">Alguns valores são definidos pela sua organização e não podem ser editados.</p>` : ""}
+      <div class="sec">Valores</div>
+      <div class="row"><span>Valor médio/hora (R$)</span><input id="s-avg" type="number" min="0" value="${sdraft.avgRate}" ${lock("avgRate")}></div>
+      <div class="row"><span>Limite de alerta (R$)</span><input id="s-limit" type="number" min="0" value="${sdraft.budgetLimit}" ${lock("budgetLimit")}></div>
+      <div class="sec">Faixas</div>${tiers}
+      <button class="sm" data-act="stieradd" ${lock("tiers")}>+ Faixa</button>
+      <p class="note">Custo/hora ≈ (salário × encargos 1,8) ÷ 160. Valores ficam só neste navegador.</p>
+      <div class="sec">Empresa</div>
+      <div class="act"><button data-act="sexp">Exportar JSON</button><button data-act="simp">Importar JSON</button></div>
+      <input type="file" id="s-file" accept="application/json" hidden>
+      <div class="sec">Histórico</div>
+      ${hist ? `<table class="tbl"><tr><th>Data</th><th>Reunião</th><th>Custo</th></tr>${hist}</table>` : "<p>Nenhuma reunião registrada.</p>"}
+      <div class="act"><button data-act="hcsv" ${shist.length ? "" : "disabled"}>Exportar CSV</button><button data-act="hclr" ${shist.length ? "" : "disabled"}>Limpar</button></div>
+      <div class="act"><button data-act="sback">Voltar</button><button class="pri" data-act="ssave">Salvar e voltar</button></div>
+      ${sflash ? `<p class="note">${sflash}</p>` : ""}`;
+  }
+
+  async function saveSettings() {
+    const cur = {
+      avgRate: Math.max(0, +sdraft.avgRate || 0),
+      budgetLimit: Math.max(0, +sdraft.budgetLimit || 0),
+      tiers: sdraft.tiers.map((t, i) => ({ name: t.name.trim() || `Faixa ${i + 1}`, rate: Math.max(0, +t.rate || 0) })),
+    };
+    await chrome.storage.local.set({ config: cur });
+    cfg = await loadConfig();
+    closeSettings();
+  }
+
+  const historyCsv = () => "data,reuniao,pessoas,duracao_s,custo\n" + shist.map((r) => [
+    new Date(r.start).toISOString(), `"${r.title.replace(/"/g, '""')}"`, r.people,
+    Math.round((r.ms ?? (r.end - r.start)) / 1000), r.cost.toFixed(2)].join(",")).join("\n");
 
   // ---------- relatório ----------
   function renderSummary() {
@@ -294,18 +368,28 @@
       // Valor digitado manualmente deixa de seguir a contagem automática.
       session.pinned = draft.mode === "avg" && meet.count !== draft.headcount;
       pushSeg(session);
+      if (draft.startTouched) setStart(parseStart(draft.startTime));
     } else {
       session = {
         code: inCall() ? meet.code : null, title: inCall() ? meet.title : "Reunião manual", manual: !inCall(),
         mode: draft.mode, avgRate: draft.avgRate, headcount: draft.headcount, tierCounts: draft.tierCounts,
         people: draft.people, defaultRate: draft.defaultRate, nextId: draft.nextId,
-        pinned: false, paused: false, start: Date.now(), segments: [],
+        pinned: false, paused: false, start: draft.startTouched ? parseStart(draft.startTime) : Date.now(), segments: [],
       };
       pushSeg(session);
+      session.segments[0].t = session.start;
     }
     saveSession();
     formOpen = false; draft = null; lostAt = 0; view = null;
     decide();
+  }
+
+  // Move o início da sessão: estende o 1º segmento para trás ou descarta o que vier antes do novo início.
+  function setStart(ts) {
+    const segs = session.segments;
+    if (ts >= segs[0].t) while (segs.length > 1 && segs[1].t <= ts) segs.shift();
+    segs[0].t = ts;
+    session.start = ts;
   }
 
   async function finish(end = Date.now(), manualClick = false) {
@@ -351,7 +435,8 @@
     const el = e.target.closest("[data-act]");
     if (!el) return;
     const act = el.dataset.act;
-    if (draft && ["mode", "step", "addp", "delp"].includes(act)) draft.dirty = true;
+    if (draft && ["mode", "step", "addp", "delp", "startnow"].includes(act)) draft.dirty = true;
+    if (act === "startnow") { draft.startTime = hhmm(Date.now()); draft.startTouched = true; render(); return; }
     if (act === "mode") { draft.mode = el.dataset.m; render(); }
     else if (act === "step") { const i = +el.dataset.t; draft.tierCounts[i] = Math.max(0, (draft.tierCounts[i] || 0) + +el.dataset.d); render(); }
     else if (act === "addp") {
@@ -365,7 +450,15 @@
     else if (act === "go") submitForm();
     else if (act === "cancel") { if (!session) skipped = meet.code; formOpen = false; draft = null; view = null; decide(); }
     else if (act === "manual" || act === "adjust") { formOpen = true; draft = null; view = null; decide(); }
-    else if (act === "options") chrome.runtime.openOptionsPage();
+    else if (act === "options") openSettings();
+    else if (act === "sback") closeSettings();
+    else if (act === "ssave") saveSettings();
+    else if (act === "stieradd") { sdraft.tiers.push({ name: "", rate: 50 }); render(); }
+    else if (act === "stierdel") { sdraft.tiers.splice(+el.dataset.i, 1); render(); }
+    else if (act === "sexp") download("custo-reuniao-config.json", JSON.stringify(sdraft, null, 2), "application/json");
+    else if (act === "simp") $("#s-file").click();
+    else if (act === "hcsv") download("reunioes.csv", historyCsv(), "text/csv");
+    else if (act === "hclr") { if (confirm("Apagar todo o histórico?")) { shist = []; chrome.storage.local.remove("history"); render(); } }
     else if (act === "pin") pin();
     else if (act === "pause") { pushSeg(session, !session.paused); saveSession(); updateLive(); }
     else if (act === "finish") finish(Date.now(), true);
@@ -411,17 +504,37 @@
   // Edição de campos: no formulário atualiza o rascunho; na lista ao vivo atualiza a sessão.
   app.addEventListener("input", (e) => {
     const t = e.target;
+    if (view === "settings") {
+      const i = +t.dataset.i;
+      if (t.id === "s-avg") sdraft.avgRate = +t.value;
+      else if (t.id === "s-limit") sdraft.budgetLimit = +t.value;
+      else if (t.classList.contains("s-tn")) sdraft.tiers[i].name = t.value;
+      else if (t.classList.contains("s-tr")) sdraft.tiers[i].rate = +t.value;
+      return;
+    }
     if (view !== "form" || !draft) return;
     draft.dirty = true;
     const i = +t.dataset.i;
     if (t.id === "avg") draft.avgRate = +t.value;
     else if (t.id === "hc") draft.headcount = +t.value;
     else if (t.id === "def") draft.defaultRate = +t.value;
+    else if (t.id === "start") { draft.startTime = t.value; draft.startTouched = true; }
     else if (t.classList.contains("nm")) draft.people[i].name = t.value;
     else if (t.classList.contains("rt")) draft.people[i].rate = +t.value;
   });
-  app.addEventListener("change", (e) => {
+  app.addEventListener("change", async (e) => {
     const t = e.target;
+    if (view === "settings" && t.id === "s-file") {
+      try {
+        const j = JSON.parse(await t.files[0].text());
+        if (j.avgRate != null) sdraft.avgRate = +j.avgRate || 0;
+        if (j.budgetLimit != null) sdraft.budgetLimit = +j.budgetLimit || 0;
+        if (Array.isArray(j.tiers)) sdraft.tiers = j.tiers.map((x) => ({ name: String(x.name || ""), rate: +x.rate || 0 }));
+        sflash = "Importado. Clique em Salvar para aplicar.";
+      } catch { sflash = "JSON inválido."; }
+      render();
+      return;
+    }
     if (view === "form" && t.classList.contains("tr") && t.value !== "") {
       draft.dirty = true;
       draft.people[+t.dataset.i].rate = cfg.tiers[+t.value].rate;
