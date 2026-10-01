@@ -21,7 +21,7 @@ button.sm{padding:4px 8px;font-size:12px}
 .act{display:flex;gap:8px;margin-top:auto}.act button{flex:1}
 .paused .cost{opacity:.55}
 h2{margin:0;font-size:18px}p{margin:0;color:var(--mut);font-size:13px;line-height:1.4}
-.idle{margin:auto 0;text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center}.idle .emoji{font-size:44px}
+.idle{text-align:center;justify-content:center;align-items:center}.idle .emoji{font-size:44px}
 .opt{display:block;border:2px solid var(--bg3);border-radius:10px;padding:10px 12px;cursor:pointer;font-size:14px}
 .opt.sel{border-color:var(--pri);background:#26305a}.opt small{display:block;color:var(--mut);margin-top:2px;font-weight:400}
 .row{display:flex;align-items:center;justify-content:space-between;font-size:14px;gap:8px}
@@ -61,3 +61,5 @@ input:disabled,button:disabled{opacity:.45;cursor:not-allowed}
 .badge{background:#26407a;color:#cfe0ff;border-radius:99px;padding:1px 7px;font-size:10.5px;white-space:nowrap}
 .foot{display:flex;flex-direction:column;gap:8px;margin-top:auto;flex:none}.foot .act{margin-top:0}.grow{flex:1}
 .pr{flex:none}
+.scroll{flex:1 1 0;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px}
+#app>header{flex:none}

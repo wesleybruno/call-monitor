@@ -1,6 +1,6 @@
 (async () => {
   const { brl, fmtTime, compact, loadConfig } = Common;
-  const app = document.getElementById("app"); // pode ser movido para a janela PiP
+  const app = document.getElementById("app");
   const $ = (s) => app.querySelector(s);
   const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const norm = (n) => n.trim().toLowerCase();
@@ -18,7 +18,6 @@
   let draft = null;
   let skipped = null;     // código da reunião em que o usuário pulou o check-in
   let lostAt = 0;
-  let pip = null;
   let plistSig = "";
   let settingsOpen = false;
   let sdraft = null;      // rascunho das configurações
@@ -159,9 +158,9 @@
     plistSig = "";
     if (view === "idle") {
       app.innerHTML = `<header><span>Custo da reunião</span><span class="tools"><button data-act="options" title="Configurações">⚙</button></span></header>
-        <div class="idle"><div class="emoji">💸</div><h2>Aguardando reunião</h2>
-        <p>Entre numa chamada do Google Meet. O check-in aparece aqui automaticamente.</p>
-        <button data-act="manual">Iniciar manualmente</button></div>`;
+        <div class="scroll idle"><div class="emoji">💸</div><h2>Aguardando reunião</h2>
+        <p>Entre numa chamada do Google Meet. O check-in aparece aqui automaticamente.</p></div>
+        <div class="foot"><button data-act="manual">Iniciar manualmente</button></div>`;
     } else if (view === "form") renderForm();
     else if (view === "live") renderLive();
     else if (view === "summary") renderSummary();
@@ -190,20 +189,20 @@
         <button class="sm" data-act="addp">+ Adicionar pessoa</button>`;
     }
     app.innerHTML = `<header><span>${editing ? "Ajustar" : "Check-in da reunião"}</span></header>
-      <h2>${editing ? "Ajustar valores" : "Como calcular o custo?"}</h2>
+      <div class="scroll"><h2>${editing ? "Ajustar valores" : "Como calcular o custo?"}</h2>
       ${!editing && inCall() ? `<p>${esc(meet.title || "Chamada do Meet")}${auto ? ` · ${auto} participante(s) detectado(s)` : ""}</p>` : ""}
       <div class="row"><span>Início da reunião</span><span class="step"><input id="start" type="time" value="${draft.startTime}"><button class="sm" data-act="startnow">Agora</button></span></div>
       <p class="note">Já começou? Informe o horário: o custo conta desde lá, com os participantes e valores atuais.</p>
       ${opt("avg", "Média única", "Mesmo valor/hora para todos. Acompanha a contagem do Meet.")}
       ${opt("tiers", "Por faixa", "Quantas pessoas de cada nível.")}
       ${opt("people", "Por pessoa", "Valor individual de cada participante. Gera relatório individual.")}
-      ${body}
-      <div class="act"><button data-act="cancel">${editing ? "Cancelar" : "Agora não"}</button><button class="pri" data-act="go">${editing ? "Salvar" : "Iniciar contagem"}</button></div>`;
+      ${body}</div>
+      <div class="foot"><div class="act"><button data-act="cancel">${editing ? "Cancelar" : "Agora não"}</button><button class="pri" data-act="go">${editing ? "Salvar" : "Iniciar contagem"}</button></div></div>`;
   }
 
   function renderLive() {
     app.innerHTML = `<div class="live" id="live" style="display:contents">
-      <header><span>Custo da reunião</span><span class="tools"><button data-act="pin" title="Fixar sobre as outras janelas">📌</button><button data-act="options" title="Configurações">⚙</button></span></header>
+      <header><span>Custo da reunião</span><span class="tools"><button data-act="options" title="Configurações">⚙</button></span></header>
       <div class="cost" id="cost">R$ 0,00</div>
       <div class="bar"><i id="bar"></i></div><div class="budget" id="budget"></div>
       <div class="stats"><div><small id="since">Tempo</small><b id="time"></b></div><div><small>Pessoas</small><b id="ppl"></b></div><div><small>Por hora</small><b id="rate"></b></div></div>
@@ -230,7 +229,7 @@
     list.forEach((p) => { lastN[p.group] = Math.max(lastN[p.group] || 0, p.n); if (p.present) hasPresent[p.group] = true; });
     const canReturn = (p) => !p.present && p.n === lastN[p.group] && !hasPresent[p.group];
     const sig = list.map((p) => `${p.id}|${p.name}|${p.present}|${canReturn(p)}`).join(";");
-    const ae = app.ownerDocument.activeElement;
+    const ae = document.activeElement;
     const typing = ae && ae.tagName === "INPUT" && box.contains(ae); // só adia a reconstrução se estiver digitando
     if (sig !== plistSig && !typing) {
       plistSig = sig;
@@ -302,7 +301,7 @@
       <button class="sm" data-act="stierdel" data-i="${i}" ${lock("tiers")}>✕</button></div>`).join("");
     const hist = shist.slice(0, 8).map((h) => `<tr><td>${new Date(h.start).toLocaleDateString("pt-BR")}</td><td>${esc(h.title)}</td><td>${brl(h.cost)}</td></tr>`).join("");
     app.innerHTML = `<header><span>Configurações</span><span class="tools"><button data-act="sback">← Voltar</button></span></header>
-      ${Object.keys(smanaged).length ? `<p class="note">Alguns valores são definidos pela sua organização e não podem ser editados.</p>` : ""}
+      <div class="scroll">${Object.keys(smanaged).length ? `<p class="note">Alguns valores são definidos pela sua organização e não podem ser editados.</p>` : ""}
       <div class="sec">Valores</div>
       <div class="row"><span>Valor médio/hora (R$)</span><input id="s-avg" type="number" min="0" value="${sdraft.avgRate}" ${lock("avgRate")}></div>
       <div class="row"><span>Limite de alerta (R$)</span><input id="s-limit" type="number" min="0" value="${sdraft.budgetLimit}" ${lock("budgetLimit")}></div>
@@ -315,8 +314,8 @@
       <div class="sec">Histórico</div>
       ${hist ? `<table class="tbl"><tr><th>Data</th><th>Reunião</th><th>Custo</th></tr>${hist}</table>` : "<p>Nenhuma reunião registrada.</p>"}
       <div class="act"><button data-act="hcsv" ${shist.length ? "" : "disabled"}>Exportar CSV</button><button data-act="hclr" ${shist.length ? "" : "disabled"}>Limpar</button></div>
-      <div class="act"><button data-act="sback">Voltar</button><button class="pri" data-act="ssave">Salvar e voltar</button></div>
-      ${sflash ? `<p class="note">${sflash}</p>` : ""}`;
+      ${sflash ? `<p class="note">${sflash}</p>` : ""}</div>
+      <div class="foot"><div class="act"><button data-act="sback">Voltar</button><button class="pri" data-act="ssave">Salvar e voltar</button></div></div>`;
   }
 
   async function saveSettings() {
@@ -343,7 +342,7 @@
     const rows = (r.rows || []).map((p) => `<tr><td>${esc(p.name)}${p.entries > 1 ? ` <small>(${p.entries} entradas)</small>` : ""}<span class="share" style="width:${r.cost ? (p.cost / r.cost) * 100 : 0}%"></span></td>
       <td>${fmtTime(p.ms)}</td><td>${brl(p.cost)}</td><td>${r.cost ? Math.round((p.cost / r.cost) * 100) : 0}%</td></tr>`).join("");
     app.innerHTML = `<header><span>Relatório da reunião</span></header>
-      <div><h2>${esc(r.title)}</h2><p>${new Date(r.start).toLocaleString("pt-BR")} · ${modeName}</p></div>
+      <div class="scroll"><div><h2>${esc(r.title)}</h2><p>${new Date(r.start).toLocaleString("pt-BR")} · ${modeName}</p></div>
       <div class="cost">${brl(r.cost)}</div>
       <div class="grid2">
         ${stat("Duração", fmtTime(r.ms))}
@@ -358,7 +357,8 @@
       ${rows ? `<table class="tbl"><tr><th>Nome</th><th>Tempo</th><th>Custo</th><th>%</th></tr>${rows}</table>`
         : `<p>Relatório individual só existe no modo <b>Por pessoa</b>. Use-o no próximo check-in.</p>`}
       ${r.partialFrom && rows ? `<p>Individual considera só o período após ${new Date(r.partialFrom).toLocaleTimeString("pt-BR")} (quando passou ao modo por pessoa).</p>` : ""}
-      <div class="act wrap"><button data-act="copy">Copiar</button><button data-act="csv">CSV</button><button class="pri" data-act="closeSummary">Fechar</button></div>`;
+      </div>
+      <div class="foot"><div class="act"><button data-act="copy">Copiar</button><button data-act="csv">CSV</button><button class="pri" data-act="closeSummary">Fechar</button></div></div>`;
   }
 
   function reportText(r) {
@@ -444,17 +444,6 @@
     decide();
   }
 
-  async function pin() {
-    if (!window.documentPictureInPicture) return alert("Este Chrome não suporta janela flutuante (precisa da versão 116+).");
-    if (pip) { pip.close(); return; }
-    pip = await documentPictureInPicture.requestWindow({ width: 360, height: 520 });
-    const link = pip.document.createElement("link");
-    link.rel = "stylesheet"; link.href = chrome.runtime.getURL("src/monitor.css");
-    pip.document.head.append(link);
-    pip.document.body.append(app);
-    pip.addEventListener("pagehide", () => { document.body.prepend(app); pip = null; });
-  }
-
   function download(name, text, type) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([text], { type }));
@@ -490,7 +479,6 @@
     else if (act === "simp") $("#s-file").click();
     else if (act === "hcsv") download("reunioes.csv", historyCsv(), "text/csv");
     else if (act === "hclr") { if (confirm("Apagar todo o histórico?")) { shist = []; chrome.storage.local.remove("history"); render(); } }
-    else if (act === "pin") pin();
     else if (act === "pause") { pushSeg(session, !session.paused); saveSession(); updateLive(); }
     else if (act === "finish") finish(Date.now(), true);
     else if (act === "pleave") {

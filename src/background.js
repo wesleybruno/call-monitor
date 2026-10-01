@@ -8,11 +8,13 @@ async function openMonitor(focused) {
       return;
     } catch {}
   }
+  // Tamanho único para todas as telas; lembra o que o usuário arrastou.
+  const { winSize } = await chrome.storage.local.get("winSize");
   const w = await chrome.windows.create({
     url: chrome.runtime.getURL("src/monitor.html"),
     type: "popup",
-    width: 400,
-    height: 640,
+    width: winSize?.width || 400,
+    height: winSize?.height || 640,
     focused,
   });
   await chrome.storage.session.set({ monitorWin: w.id });
@@ -47,4 +49,11 @@ chrome.runtime.onMessage.addListener((msg) => {
 chrome.windows.onRemoved.addListener(async (id) => {
   const { monitorWin } = await chrome.storage.session.get("monitorWin");
   if (monitorWin === id) chrome.storage.session.remove("monitorWin");
+});
+
+chrome.windows.onBoundsChanged.addListener(async (win) => {
+  const { monitorWin } = await chrome.storage.session.get("monitorWin");
+  if (win.id === monitorWin && win.state === "normal" && win.width && win.height) {
+    chrome.storage.local.set({ winSize: { width: win.width, height: win.height } });
+  }
 });
