@@ -31,7 +31,7 @@ input[type=number]{width:90px;padding:7px;border:1px solid var(--bg3);border-rad
 .sum div{display:flex;justify-content:space-between;align-items:baseline;font-size:14px;padding:6px 0;border-bottom:1px solid var(--bg2)}
 .sum b{font-size:30px}
 [hidden]{display:none!important}
-.prow{display:grid;grid-template-columns:1fr 78px 64px 28px;gap:6px;align-items:center}
+.prow{display:grid;grid-template-columns:minmax(0,1fr) 78px 64px 28px;gap:6px;align-items:center}
 .prow input,.prow select{width:100%;min-width:0;padding:6px;border:1px solid var(--bg3);border-radius:6px;font-size:13px;background:var(--bg2);color:var(--fg)}
 .prow.dim{opacity:.45}
 .sec{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin-top:4px}
@@ -63,3 +63,9 @@ input:disabled,button:disabled{opacity:.45;cursor:not-allowed}
 .pr{flex:none}
 .scroll{flex:1 1 0;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px}
 #app>header{flex:none}
+/* Barra de rolagem fina e sempre reservada, fora da área útil: todas as telas ficam com a mesma largura de conteúdo. */
+.scroll,.plist{margin-right:-6px;scrollbar-gutter:stable;overflow-x:hidden}
+.scroll::-webkit-scrollbar,.plist::-webkit-scrollbar{width:6px}
+.scroll::-webkit-scrollbar-thumb,.plist::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:3px}
+.row{min-width:0}.row .step input[type=time]{width:112px;min-width:0}
+.step button.sm{width:auto;padding:5px 10px}

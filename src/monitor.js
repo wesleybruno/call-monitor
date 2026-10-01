@@ -154,8 +154,16 @@
     };
   }
 
+  let lastView = null;
   function render() {
     plistSig = "";
+    // Re-render da mesma tela (escolher faixa, +/−, adicionar...) não pode jogar a rolagem para o topo.
+    const keep = lastView === view ? [$(".scroll"), $("#plist")].map((e) => (e ? e.scrollTop : 0)) : [0, 0];
+    renderView();
+    [$(".scroll"), $("#plist")].forEach((e, i) => { if (e) e.scrollTop = keep[i]; });
+    lastView = view;
+  }
+  function renderView() {
     if (view === "idle") {
       app.innerHTML = `<header><span>Custo da reunião</span><span class="tools"><button data-act="options" title="Configurações">⚙</button></span></header>
         <div class="scroll idle"><div class="emoji">💸</div><h2>Aguardando reunião</h2>
