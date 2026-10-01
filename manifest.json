@@ -3,7 +3,7 @@
   "name": "Custo da Reunião",
   "version": "0.2.0",
   "description": "Painel em janela própria que mostra em tempo real quanto a reunião do Google Meet está custando.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "scripting"],
   "host_permissions": ["https://meet.google.com/*"],
   "content_scripts": [
     {

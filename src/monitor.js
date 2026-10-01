@@ -20,6 +20,9 @@
   let pip = null;
   let plistSig = "";
 
+  // Meet publicando há pouco = chamada em andamento (evita estado velho de reunião já encerrada).
+  const inCall = () => !!meet.inCall && Date.now() - (meet.ts || 0) < 20000;
+
   // ---------- modelo ----------
   const presentOf = (s) => s.people.filter((p) => p.present);
   const rateOf = (s) =>
@@ -97,7 +100,7 @@
     if (formOpen) v = "form";
     else if (session) v = "live";
     else if (summary) v = "summary";
-    else if (meet.inCall && skipped !== meet.code) v = "form";
+    else if (inCall() && skipped !== meet.code) v = "form";
     else v = "idle";
     if (v === "form" && !draft) draft = makeDraft();
     if (v !== view) { view = v; render(); }
@@ -113,7 +116,8 @@
       ? session.people.map((p) => ({ ...p, hist: true }))
       : (meet.names || []).map((n) => ({ id: "p" + nextId++, name: n, rate: defaultRate, present: true, manual: false, locked: false, removed: false, miss: 0, statusAt: Date.now() }));
     return {
-      mode: session ? session.mode : "avg",
+      mode: session ? session.mode : (meet.names && meet.names.length ? "people" : "avg"),
+      srcSig: JSON.stringify([meet.names, meet.count]), dirty: false,
       avgRate: session ? session.avgRate : cfg.avgRate,
       headcount: session ? session.headcount : auto || 2,
       tierCounts, people, defaultRate, nextId,
@@ -155,7 +159,7 @@
     }
     app.innerHTML = `<header><span>${editing ? "Ajustar" : "Check-in da reunião"}</span></header>
       <h2>${editing ? "Ajustar valores" : "Como calcular o custo?"}</h2>
-      ${!editing && meet.inCall ? `<p>${esc(meet.title || "Chamada do Meet")}${auto ? ` · ${auto} participante(s) detectado(s)` : ""}</p>` : ""}
+      ${!editing && inCall() ? `<p>${esc(meet.title || "Chamada do Meet")}${auto ? ` · ${auto} participante(s) detectado(s)` : ""}</p>` : ""}
       ${opt("avg", "Média única", "Mesmo valor/hora para todos. Acompanha a contagem do Meet.")}
       ${opt("tiers", "Por faixa", "Quantas pessoas de cada nível.")}
       ${opt("people", "Por pessoa", "Valor individual de cada participante. Gera relatório individual.")}
@@ -222,7 +226,7 @@
     $("#pause").textContent = session.paused ? "▶ Retomar" : "⏸ Pausar";
     const hint = $("#hint");
     const auto = meet.count;
-    if (session.mode === "tiers" && meet.inCall && auto && auto !== peopleOf(session)) {
+    if (session.mode === "tiers" && inCall() && auto && auto !== peopleOf(session)) {
       hint.hidden = false;
       hint.innerHTML = `<span>Meet detecta ${auto}, você marcou ${peopleOf(session)}.</span><button class="sm" data-act="adjust">Ajustar</button>`;
     } else hint.hidden = true;
@@ -292,7 +296,7 @@
       pushSeg(session);
     } else {
       session = {
-        code: meet.inCall ? meet.code : null, title: meet.inCall ? meet.title : "Reunião manual", manual: !meet.inCall,
+        code: inCall() ? meet.code : null, title: inCall() ? meet.title : "Reunião manual", manual: !inCall(),
         mode: draft.mode, avgRate: draft.avgRate, headcount: draft.headcount, tierCounts: draft.tierCounts,
         people: draft.people, defaultRate: draft.defaultRate, nextId: draft.nextId,
         pinned: false, paused: false, start: Date.now(), segments: [],
@@ -347,6 +351,7 @@
     const el = e.target.closest("[data-act]");
     if (!el) return;
     const act = el.dataset.act;
+    if (draft && ["mode", "step", "addp", "delp"].includes(act)) draft.dirty = true;
     if (act === "mode") { draft.mode = el.dataset.m; render(); }
     else if (act === "step") { const i = +el.dataset.t; draft.tierCounts[i] = Math.max(0, (draft.tierCounts[i] || 0) + +el.dataset.d); render(); }
     else if (act === "addp") {
@@ -407,6 +412,7 @@
   app.addEventListener("input", (e) => {
     const t = e.target;
     if (view !== "form" || !draft) return;
+    draft.dirty = true;
     const i = +t.dataset.i;
     if (t.id === "avg") draft.avgRate = +t.value;
     else if (t.id === "hc") draft.headcount = +t.value;
@@ -417,6 +423,7 @@
   app.addEventListener("change", (e) => {
     const t = e.target;
     if (view === "form" && t.classList.contains("tr") && t.value !== "") {
+      draft.dirty = true;
       draft.people[+t.dataset.i].rate = cfg.tiers[+t.value].rate;
       render();
     } else if (view === "live" && (t.classList.contains("prate") || t.classList.contains("pname"))) {
@@ -429,14 +436,19 @@
   // ---------- sinais do Meet ----------
   function onMeetChange() {
     if (session) {
-      if (session.mode === "avg" && !session.pinned && !session.paused && meet.inCall && meet.count && meet.count !== session.headcount) {
+      if (session.mode === "avg" && !session.pinned && !session.paused && inCall() && meet.count && meet.count !== session.headcount) {
         session.headcount = meet.count;
         pushSeg(session);
         saveSession();
-      } else if (session.mode === "people" && meet.inCall && syncPeople(meet.names)) {
+      } else if (session.mode === "people" && inCall() && syncPeople(meet.names)) {
         if (!session.paused) pushSeg(session);
         saveSession();
       }
+    }
+    // Check-in aberto e ainda intocado: reflete na hora o que o Meet detectar (nomes chegam depois do scan).
+    if (view === "form" && !session && draft && !draft.dirty && draft.srcSig !== JSON.stringify([meet.names, meet.count])) {
+      draft = makeDraft();
+      render();
     }
     decide();
     if (view === "live") updateLive();
@@ -461,4 +473,6 @@
   }, 1000);
 
   decide();
+  // Pede às abas do Meet que publiquem agora (injeta o script se a aba já estava aberta antes da extensão).
+  chrome.runtime.sendMessage({ type: "scan" }).catch(() => {});
 })();

@@ -1,6 +1,8 @@
 // Só observa o Meet e publica o estado em chrome.storage.local.meet.
 // Check-in, cálculo e UI ficam na janela do painel (monitor.js).
 (() => {
+  if (window.__meetCostLoaded) return; // evita injeção dupla
+  window.__meetCostLoaded = true;
   const SRC = Math.random().toString(36).slice(2);
   let announced = null;
 
@@ -25,6 +27,7 @@
     announced = null;
   }
 
+  chrome.runtime.onMessage.addListener((m) => { if (m && m.type === "scan") publish(); });
   setInterval(publish, 2000);
   addEventListener("pagehide", clear);
   publish();
