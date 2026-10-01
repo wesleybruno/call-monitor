@@ -9,6 +9,7 @@
   const st = await chrome.storage.local.get(["session", "meet", "pendingSummary"]);
   let session = st.session || null;
   if (session && !session.people) Object.assign(session, { people: [], defaultRate: session.avgRate || cfg.avgRate, nextId: 1 }); // sessão de versão antiga
+  if (session) session.people.forEach((p) => { p.group ??= p.id; p.n ??= 1; p.key ??= p.name.trim().toLowerCase(); });
   let meet = st.meet || {};
   let summary = st.pendingSummary || null;
 
@@ -79,32 +80,45 @@
   }
   const saveSession = () => chrome.storage.local.set({ session });
 
-  const newPerson = (s, name, rate, manual = true) => ({
-    id: "p" + s.nextId++, name, rate, present: true, manual, locked: false, removed: false, miss: 0, statusAt: Date.now(),
+  // Cada passagem de uma pessoa pela reunião é uma entrada (linha) própria. Saiu e voltou = nova entrada,
+  // todas ligadas pelo mesmo `group`/`key`. O custo individual do relatório soma as entradas do grupo.
+  const mkPerson = (id, name, rate, manual) => ({
+    id, group: id, n: 1, key: norm(name), name, rate, present: true, manual, locked: false, removed: false, miss: 0,
+    statusAt: Date.now(), joinedAt: Date.now(), leftAt: null,
   });
-  const setPresent = (p, v) => { if (p.present !== v) { p.present = v; p.statusAt = Date.now(); } };
+  function addEntry(s, name, rate, manual = true) {
+    const prev = s.people.filter((x) => (x.key || norm(x.name)) === norm(name));
+    const p = mkPerson("p" + s.nextId++, name, rate, manual);
+    if (prev.length) { const last = prev[prev.length - 1]; Object.assign(p, { group: last.group, n: prev.length + 1, name: last.name, key: last.key }); }
+    s.people.push(p);
+    return p;
+  }
+  const leave = (p) => { if (p.present) { p.present = false; p.statusAt = p.leftAt = Date.now(); } };
+  const ignoreKey = (p) => { (session.ignored ||= {})[p.key] = true; };
 
   // Sincroniza a lista de pessoas com os nomes detectados no Meet.
-  // `locked` = o usuário forçou o estado; vale até a detecção concordar com ele.
+  // `locked` = presença forçada pelo usuário; vale até o Meet confirmar que a pessoa está lá.
+  // `ignored` = usuário disse que saiu/removeu; não recria a entrada até a pessoa sumir do Meet.
   function syncPeople(names) {
     if (!session || session.mode !== "people" || !names || !names.length) return false;
     let changed = false;
     const seen = new Set(names.map(norm));
+    const ign = (session.ignored ||= {});
+    for (const k of Object.keys(ign)) if (!seen.has(k)) delete ign[k];
     for (const n of names) {
-      const p = session.people.find((x) => norm(x.name) === norm(n));
-      if (!p) { session.people.push(newPerson(session, n, session.defaultRate, false)); changed = true; continue; }
-      if (p.removed) continue; // removido de propósito: ignora
-      p.miss = 0;
-      if (p.locked) { if (p.present) p.locked = false; continue; }
-      if (!p.present) { setPresent(p, true); changed = true; }
+      const k = norm(n);
+      const cur = session.people.find((x) => x.key === k && x.present && !x.removed);
+      if (cur) { cur.miss = 0; cur.locked = false; continue; }
+      if (ign[k]) continue;
+      const prev = session.people.filter((x) => x.key === k).pop();
+      addEntry(session, n, prev ? prev.rate : session.defaultRate, false);
+      changed = true;
     }
-    // Ausente só depois de 3 leituras seguidas sem aparecer (evita oscilação do DOM).
+    // Saída automática só depois de 3 leituras seguidas sem aparecer (evita oscilação do DOM).
     for (const p of session.people) {
-      if (p.removed || p.manual || seen.has(norm(p.name))) continue;
-      if (p.locked) { if (!p.present) p.locked = false; continue; }
-      if (!p.present) continue;
+      if (!p.present || p.removed || p.manual || p.locked || seen.has(p.key)) continue;
       p.miss = (p.miss || 0) + 1;
-      if (p.miss >= 3) { setPresent(p, false); changed = true; }
+      if (p.miss >= 3) { leave(p); changed = true; }
     }
     return changed;
   }
@@ -130,7 +144,7 @@
     let nextId = session ? session.nextId : 1;
     const people = session && session.people.length
       ? session.people.map((p) => ({ ...p, hist: true }))
-      : (meet.names || []).map((n) => ({ id: "p" + nextId++, name: n, rate: defaultRate, present: true, manual: false, locked: false, removed: false, miss: 0, statusAt: Date.now() }));
+      : (meet.names || []).map((n) => mkPerson("p" + nextId++, n, defaultRate, false));
     return {
       mode: session ? session.mode : (meet.names && meet.names.length ? "people" : "avg"),
       srcSig: JSON.stringify([meet.names, meet.count]), dirty: false,
@@ -203,29 +217,36 @@
   }
 
   const since = (t) => fmtTime(Date.now() - (t || Date.now())).replace(/^00:/, "");
+  const dur = (ms) => fmtTime(ms).replace(/^00:/, "");
   function updatePList(per) {
     const box = $("#plist");
     if (!box) return;
-    const list = session.people.filter((p) => !p.removed).sort((a, b) => b.present - a.present);
-    const sig = list.map((p) => `${p.id}|${p.name}|${p.present}`).join(";");
-    const focused = box.contains(app.ownerDocument.activeElement);
-    if (sig !== plistSig && !focused) {
+    const list = session.people.filter((p) => !p.removed).sort((a, b) => b.present - a.present || a.joinedAt - b.joinedAt);
+    const lastN = {}; const hasPresent = {};
+    list.forEach((p) => { lastN[p.group] = Math.max(lastN[p.group] || 0, p.n); if (p.present) hasPresent[p.group] = true; });
+    const canReturn = (p) => !p.present && p.n === lastN[p.group] && !hasPresent[p.group];
+    const sig = list.map((p) => `${p.id}|${p.name}|${p.present}|${canReturn(p)}`).join(";");
+    const ae = app.ownerDocument.activeElement;
+    const typing = ae && ae.tagName === "INPUT" && box.contains(ae); // só adia a reconstrução se estiver digitando
+    if (sig !== plistSig && !typing) {
       plistSig = sig;
       box.innerHTML = list.map((p) => `<div class="pr ${p.present ? "" : "gone"}" data-id="${p.id}">
-        <div class="l1"><i class="dot"></i><input class="pname" value="${esc(p.name)}" title="Renomear"><span class="pc" data-c></span></div>
+        <div class="l1"><i class="dot"></i><input class="pname" value="${esc(p.name)}" title="Renomear">${p.n > 1 ? `<span class="badge" title="Entrada ${p.n} desta pessoa">↩ voltou</span>` : ""}<span class="pc" data-c></span></div>
         <div class="l2"><input class="prate" type="number" min="0" value="${p.rate}" title="R$/hora"><span class="ps" data-s></span>
-          <button class="sm" data-act="${p.present ? "pleave" : "preturn"}" data-id="${p.id}">${p.present ? "Saiu" : "Voltou"}</button>
-          <button class="sm danger" data-act="pdel" data-id="${p.id}" title="Remover da lista (o custo já acumulado continua no relatório)">🗑</button></div></div>`).join("")
+          ${p.present ? `<button class="sm" data-act="pleave" data-id="${p.id}">Saiu</button>` : canReturn(p) ? `<button class="sm" data-act="preturn" data-id="${p.id}">Voltou</button>` : ""}
+          <button class="sm danger" data-act="pdel" data-id="${p.id}" title="Remover esta entrada da lista (o custo já acumulado continua no relatório)">🗑</button></div></div>`).join("")
         || `<p>Nenhum participante ainda. Adicione abaixo.</p>`;
     }
     box.querySelectorAll(".pr").forEach((row) => {
       const p = session.people.find((x) => x.id === row.dataset.id);
-      const r = per[p.id];
-      row.querySelector("[data-c]").textContent = brl(r ? r.cost : 0);
-      row.querySelector("[data-s]").textContent = p.present ? "presente" + (r ? " · " + since(Date.now() - r.ms) : "") : "saiu há " + since(p.statusAt);
+      const ms = per[p.id] ? per[p.id].ms : 0;
+      row.querySelector("[data-c]").textContent = brl(per[p.id] ? per[p.id].cost : 0);
+      row.querySelector("[data-s]").textContent = p.present
+        ? `${p.n > 1 ? "voltou" : "entrou"} às ${hhmm(p.joinedAt)} · ${dur(ms)}`
+        : `saiu às ${hhmm(p.leftAt || p.statusAt)} · ficou ${dur(ms)}`;
     });
     const here = list.filter((p) => p.present).length;
-    $("#pcount").textContent = `Participantes · ${here} presente(s)${list.length - here ? ` · ${list.length - here} fora` : ""}`;
+    $("#pcount").textContent = `Participantes · ${here} presente(s)${list.length - here ? ` · ${list.length - here} saída(s)` : ""}`;
   }
 
   function updateLive() {
@@ -315,7 +336,7 @@
     const hours = r.ms / 3.6e6;
     const stat = (l, v) => `<div><small>${l}</small><b>${v}</b></div>`;
     const modeName = { avg: "Média única", tiers: "Por faixa", people: "Por pessoa" }[r.mode];
-    const rows = (r.rows || []).map((p) => `<tr><td>${esc(p.name)}<span class="share" style="width:${r.cost ? (p.cost / r.cost) * 100 : 0}%"></span></td>
+    const rows = (r.rows || []).map((p) => `<tr><td>${esc(p.name)}${p.entries > 1 ? ` <small>(${p.entries} entradas)</small>` : ""}<span class="share" style="width:${r.cost ? (p.cost / r.cost) * 100 : 0}%"></span></td>
       <td>${fmtTime(p.ms)}</td><td>${brl(p.cost)}</td><td>${r.cost ? Math.round((p.cost / r.cost) * 100) : 0}%</td></tr>`).join("");
     app.innerHTML = `<header><span>Relatório da reunião</span></header>
       <div><h2>${esc(r.title)}</h2><p>${new Date(r.start).toLocaleString("pt-BR")} · ${modeName}</p></div>
@@ -342,7 +363,7 @@
       `Custo/hora médio: ${brl(r.ms ? r.cost / (r.ms / 3.6e6) : 0)}`];
     if (r.rows && r.rows.length) {
       L.push("", "Por participante:");
-      r.rows.forEach((p) => L.push(`- ${p.name}: ${fmtTime(p.ms)} · ${brl(p.cost)} (${r.cost ? Math.round((p.cost / r.cost) * 100) : 0}%)`));
+      r.rows.forEach((p) => L.push(`- ${p.name}${p.entries > 1 ? ` (${p.entries} entradas)` : ""}: ${fmtTime(p.ms)} · ${brl(p.cost)} (${r.cost ? Math.round((p.cost / r.cost) * 100) : 0}%)`));
     }
     return L.join("\n");
   }
@@ -351,8 +372,8 @@
     const L = ["campo,valor", `reuniao,${q(r.title)}`, `inicio,${new Date(r.start).toISOString()}`, `custo_total,${r.cost.toFixed(2)}`,
       `duracao_s,${Math.round(r.ms / 1000)}`, `pico_pessoas,${r.people}`, `media_pessoas,${r.avgPeople.toFixed(2)}`];
     if (r.rows && r.rows.length) {
-      L.push("", "participante,tempo_s,custo,percentual");
-      r.rows.forEach((p) => L.push(`${q(p.name)},${Math.round(p.ms / 1000)},${p.cost.toFixed(2)},${r.cost ? ((p.cost / r.cost) * 100).toFixed(1) : 0}`));
+      L.push("", "participante,entradas,tempo_s,custo,percentual");
+      r.rows.forEach((p) => L.push(`${q(p.name)},${p.entries || 1},${Math.round(p.ms / 1000)},${p.cost.toFixed(2)},${r.cost ? ((p.cost / r.cost) * 100).toFixed(1) : 0}`));
     }
     return L.join("\n");
   }
@@ -362,7 +383,7 @@
     draft.avgRate = Math.max(0, +draft.avgRate || 0);
     draft.headcount = Math.max(1, +draft.headcount || 1);
     draft.defaultRate = Math.max(0, +draft.defaultRate || 0);
-    draft.people.forEach((p, i) => { p.name = p.name.trim() || `Participante ${i + 1}`; p.rate = Math.max(0, +p.rate || 0); delete p.hist; });
+    draft.people.forEach((p, i) => { p.name = p.name.trim() || `Participante ${i + 1}`; p.rate = Math.max(0, +p.rate || 0); delete p.hist; p.key ||= norm(p.name); });
     if (session) {
       Object.assign(session, { mode: draft.mode, avgRate: draft.avgRate, headcount: draft.headcount, tierCounts: draft.tierCounts, people: draft.people, defaultRate: draft.defaultRate, nextId: draft.nextId });
       // Valor digitado manualmente deixa de seguir a contagem automática.
@@ -400,7 +421,13 @@
       code: s.code, title: s.title, start: s.start, end, ms: t.ms, pausedMs: t.pausedMs, cost: t.cost,
       people: t.peak, avgPeople: t.avgPeople, mode: s.mode, partialFrom: s.convertedAt || null,
       rows: s.mode === "people"
-        ? s.people.map((p) => ({ name: p.name, ms: t.per[p.id]?.ms || 0, cost: t.per[p.id]?.cost || 0 })).filter((p) => p.ms > 0).sort((a, b) => b.cost - a.cost)
+        ? Object.values(s.people.reduce((g, p) => {
+            const r = t.per[p.id];
+            if (!r) return g;
+            const x = (g[p.group] ||= { name: p.name, ms: 0, cost: 0, entries: 0 });
+            x.ms += r.ms; x.cost += r.cost; x.entries++;
+            return g;
+          }, {})).sort((a, b) => b.cost - a.cost)
         : [],
     };
     session = null; summary = rec; view = null;
@@ -440,7 +467,7 @@
     if (act === "mode") { draft.mode = el.dataset.m; render(); }
     else if (act === "step") { const i = +el.dataset.t; draft.tierCounts[i] = Math.max(0, (draft.tierCounts[i] || 0) + +el.dataset.d); render(); }
     else if (act === "addp") {
-      draft.people.push({ id: "p" + draft.nextId++, name: "", rate: draft.defaultRate, present: true, manual: true, locked: false, removed: false, miss: 0, statusAt: Date.now() });
+      draft.people.push(mkPerson("p" + draft.nextId++, "", draft.defaultRate, true));
       render();
     } else if (act === "delp") {
       const p = draft.people[+el.dataset.i];
@@ -462,14 +489,21 @@
     else if (act === "pin") pin();
     else if (act === "pause") { pushSeg(session, !session.paused); saveSession(); updateLive(); }
     else if (act === "finish") finish(Date.now(), true);
-    else if (act === "pleave" || act === "preturn") {
+    else if (act === "pleave") {
       const p = session.people.find((x) => x.id === el.dataset.id);
-      setPresent(p, act === "preturn"); p.locked = true; p.miss = 0;
-      pushSeg(session); saveSession(); updateLive();
+      leave(p); p.locked = false; ignoreKey(p);
+      afterPeopleChange();
+    } else if (act === "preturn") {
+      // Volta = nova entrada na lista (mesma pessoa), marcada como "voltou".
+      const p = session.people.find((x) => x.id === el.dataset.id);
+      const e2 = addEntry(session, p.name, p.rate, false);
+      e2.locked = true;
+      delete session.ignored?.[p.key];
+      afterPeopleChange();
     } else if (act === "pdel") {
       const p = session.people.find((x) => x.id === el.dataset.id);
-      setPresent(p, false); p.removed = true;
-      pushSeg(session); saveSession(); updateLive();
+      leave(p); p.removed = true; ignoreKey(p);
+      afterPeopleChange();
     } else if (act === "topeople") toPeople();
     else if (act === "closeSummary") { summary = null; chrome.storage.local.remove("pendingSummary"); view = null; decide(); }
     else if (act === "copy") { navigator.clipboard.writeText(reportText(summary)); el.textContent = "Copiado ✓"; }
@@ -482,12 +516,17 @@
     const name = $("#addname").value.trim();
     if (!name) return;
     const rate = Math.max(0, +$("#addrate").value || 0);
-    const ex = session.people.find((x) => norm(x.name) === norm(name));
-    if (ex) { Object.assign(ex, { removed: false, rate }); setPresent(ex, true); ex.locked = true; }
-    else session.people.push(newPerson(session, name, rate));
+    const cur = session.people.find((x) => x.key === norm(name) && x.present && !x.removed);
+    if (cur) cur.rate = rate; // já está na lista
+    else { addEntry(session, name, rate).locked = true; delete session.ignored?.[norm(name)]; }
     $("#addname").value = "";
-    pushSeg(session); saveSession(); plistSig = ""; updateLive();
+    afterPeopleChange();
   });
+
+  // Registra a mudança (novo segmento de custo) e redesenha a lista na hora.
+  function afterPeopleChange() {
+    pushSeg(session); saveSession(); plistSig = ""; updateLive();
+  }
 
   // Converte uma sessão em andamento (média/faixa) para o modo por pessoa, sem perder o custo acumulado.
   function toPeople() {
@@ -496,8 +535,9 @@
     session.mode = "people";
     session.defaultRate = rate;
     session.convertedAt = Date.now(); // o relatório individual só cobre dali em diante
-    session.people = (meet.names || []).map((n) => newPerson(session, n, rate, false));
-    while (session.people.length < total) session.people.push(newPerson(session, `Participante ${session.people.length + 1}`, rate));
+    session.people = [];
+    (meet.names || []).forEach((n) => addEntry(session, n, rate, false));
+    while (session.people.length < total) addEntry(session, `Participante ${session.people.length + 1}`, rate);
     pushSeg(session); saveSession(); view = null; decide();
   }
 
@@ -541,8 +581,9 @@
       render();
     } else if (view === "live" && (t.classList.contains("prate") || t.classList.contains("pname"))) {
       const p = session.people.find((x) => x.id === t.closest(".pr").dataset.id);
-      if (t.classList.contains("prate")) p.rate = Math.max(0, +t.value || 0); else p.name = t.value.trim() || p.name;
-      pushSeg(session); saveSession(); plistSig = ""; updateLive();
+      if (t.classList.contains("prate")) p.rate = Math.max(0, +t.value || 0);
+      else { const nm = t.value.trim() || p.name; session.people.forEach((x) => { if (x.group === p.group) x.name = nm; }); }
+      afterPeopleChange();
     }
   });
 
