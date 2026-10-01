@@ -1,0 +1,22 @@
+<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Custo da Reunião — Configurações</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:640px;margin:32px auto;padding:0 16px;color:#1f2330}
+h1{font-size:22px}h2{font-size:16px;margin-top:28px}
+label{display:block;margin:8px 0}input{padding:6px;border:1px solid #ccd;border-radius:6px}
+.tier{display:flex;gap:8px;margin:6px 0}button{padding:7px 12px;border:0;border-radius:8px;background:#3d7bff;color:#fff;cursor:pointer}
+button.g{background:#e6e9f4;color:#1f2330}table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:6px;border-bottom:1px solid #eee;text-align:left}
+#msg{color:#1a7f37;margin-left:8px}.note{font-size:12px;color:#666}
+</style>
+<h1>💸 Custo da Reunião</h1>
+<h2>Valores</h2>
+<label>Valor médio por hora (R$) <input id="avg" type="number" min="0"></label>
+<label>Limite de alerta (R$) <input id="limit" type="number" min="0"></label>
+<h2>Faixas</h2><div id="tiers"></div>
+<button class="g" id="add">+ Faixa</button>
+<p class="note">Dica: custo/hora = (salário × encargos ≈ 1,8) ÷ 160. Valores ficam só neste navegador. Se sua empresa definiu política, ela prevalece.</p>
+<p><button id="save">Salvar</button><span id="msg"></span></p>
+<h2>Empresa</h2>
+<button class="g" id="exp">Exportar JSON</button> <button class="g" id="imp">Importar JSON</button>
+<input type="file" id="file" accept="application/json" hidden>
+<h2>Histórico</h2><table id="hist"></table><p><button class="g" id="csv">Exportar CSV</button> <button class="g" id="clr">Limpar</button></p>
+<script src="options.js"></script></html>

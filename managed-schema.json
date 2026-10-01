@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "avgRate": { "type": "number", "title": "Valor médio por hora (R$)" },
+    "tiers": {
+      "type": "array",
+      "title": "Faixas de custo",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "rate": { "type": "number" }
+        }
+      }
+    },
+    "budgetLimit": { "type": "number", "title": "Limite de alerta (R$)" }
+  }
+}

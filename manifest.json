@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Custo da Reunião",
+  "version": "0.2.0",
+  "description": "Painel em janela própria que mostra em tempo real quanto a reunião do Google Meet está custando.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://meet.google.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["src/adapter-meet.js", "src/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "src/options.html",
+  "action": { "default_title": "Abrir painel de custo" },
+  "background": { "service_worker": "src/background.js" },
+  "storage": { "managed_schema": "managed-schema.json" }
+}
